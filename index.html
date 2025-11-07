@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Double‑Pendulum Trails — RK4 + Worker</title>
+  <style>
+    :root{
+      --bg:#050611;--panel:#0b0e1f;--text:#d9e6ff;--accent:#00f0ff;--accent2:#ff4dd2
+    }
+    html,body{height:100%;margin:0;background:radial-gradient(1200px 800px at 70% 30%, #0a0b1b 0%, #07081a 40%, var(--bg) 100%);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
+    #wrap{position:fixed;inset:0}
+    canvas{width:100%;height:100%;display:block}
+    .ui{position:fixed;right:0;bottom:36px;max-width:min(92vw,380px);background:linear-gradient(180deg,rgba(18,22,54,.75),rgba(9,11,28,.75));backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.08);box-shadow:0 10px 30px rgba(0,0,0,.35);border-radius:16px 0 0 16px;padding:14px 14px 10px;transform:translateX(0);transition:transform .28s ease}
+    .ui.collapsed{transform:translateX(calc(100% - 32px))}
+    .tab{position:absolute;top:50%;left:-32px;transform:translateY(-50%);width:32px;height:72px;border-radius:12px 0 0 12px;background:linear-gradient(180deg,var(--accent),var(--accent2));color:#021;display:flex;align-items:center;justify-content:center;cursor:pointer;font-weight:800;user-select:none;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+    .title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    h1{font-size:14px;margin:0}
+    .pill{padding:2px 8px;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent2));color:#021;font-weight:600}
+    .row{display:grid;grid-template-columns:140px 1fr;gap:8px;align-items:center;margin:8px 0}
+    .row label{font-size:12px;opacity:.85}
+    input[type=range],input[type=number]{width:100%}
+    .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    button{appearance:none;border:1px solid rgba(255,255,255,.12);background:#0e1030;color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer}
+    button:hover{border-color:rgba(255,255,255,.22)}
+    .small{font-size:11px;opacity:.8;margin-top:8px}
+    .kbd{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0d1223;border:1px solid rgba(255,255,255,.1);padding:1px 6px;border-radius:6px}
+    .eq{font-size:12px;opacity:.95;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);padding:8px;border-radius:10px;margin-top:8px}
+    .footer{position:fixed;bottom:6px;right:12px;font-size:11px;opacity:.7;color:#ccc}
+  </style>
+  <!-- MathJax for equations -->
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+  <div id="wrap"><canvas id="c"></canvas></div>
+
+  <div class="ui" id="panel" role="region" aria-label="Double pendulum controls">
+    <div class="tab" id="tab" title="Click or drag">≡</div>
+    <div class="title"><h1>Double‑Pendulum Trails</h1><span class="pill">RK4 + Worker</span></div>
+
+    <div class="row"><label for="l1">Rod 1 length L₁</label><input id="l1" type="range" min="60" max="240" value="160" step="1"></div>
+    <div class="row"><label for="l2">Rod 2 length L₂</label><input id="l2" type="range" min="60" max="240" value="160" step="1"></div>
+    <div class="row"><label for="m1">Mass m₁</label><input id="m1" type="range" min="0.2" max="5" value="1.2" step="0.1"></div>
+    <div class="row"><label for="m2">Mass m₂</label><input id="m2" type="range" min="0.2" max="5" value="1.0" step="0.1"></div>
+    <div class="row"><label for="g">Gravity g</label><input id="g" type="range" min="50" max="1000" value="500" step="10"></div>
+    <div class="row"><label for="damp">Damping</label><input id="damp" type="range" min="0" max="0.01" value="0.002" step="0.0005"></div>
+    <div class="row"><label for="trail">Trail length</label><input id="trail" type="range" min="200" max="6000" value="2500" step="50"></div>
+    <div class="row"><label for="speed">Sim speed</label><input id="speed" type="range" min="0.25" max="3" value="1.0" step="0.05"></div>
+
+    <div class="btns">
+      <button id="toggle">Pause</button>
+      <button id="reset">Reset</button>
+      <button id="randomize">Randomize</button>
+      <button id="perf">Perf: Auto</button>
+      <button id="clear">Clear trail</button>
+    </div>
+
+    <div class="eq" id="eqbox">
+      <div><strong>Equations (dimensionless form)</strong></div>
+      <div>\(\begin{aligned}
+      \dot{\theta}_1 &= \omega_1,\\
+      \dot{\theta}_2 &= \omega_2,\\
+      \dot{\omega}_1 &= \frac{-g(2m_1+m_2)\sin\theta_1 - m_2 g\sin(\theta_1-2\theta_2) - 2\sin(\theta_1-\theta_2)\, m_2 (\omega_2^2 L_2 + \omega_1^2 L_1\cos(\theta_1-\theta_2))}{L_1\,[2m_1+m_2 - m_2\cos(2\theta_1-2\theta_2)]} - \gamma\,\omega_1,\\
+      \dot{\omega}_2 &= \frac{2\sin(\theta_1-\theta_2)\,[\omega_1^2 L_1 (m_1+m_2) + g (m_1+m_2)\cos\theta_1 + \omega_2^2 L_2 m_2 \cos(\theta_1-\theta_2)]}{L_2\,[2m_1+m_2 - m_2\cos(2\theta_1-2\theta_2)]} - \gamma\,\omega_2.
+      \end{aligned}\)
+      </div>
+    </div>
+
+    <div class="small">Drag canvas to pan. Mouse wheel to zoom. Double‑click to re‑center. Keys: <span class="kbd">Space</span> play/pause, <span class="kbd">c</span> clear, <span class="kbd">r</span> reset.</div>
+    <div class="small" id="stats">FPS: — · resScale: 1.00 · quality: 1.00 · points: 0</div>
+  </div>
+
+  <div class="footer">Made by Huzaifa · <span style="color:#ff4dd2">chaos is beautiful</span></div>
+
+  <script>
+  // ---------- Utilities ----------
+  const DPR = Math.max(1, Math.min(1.5, window.devicePixelRatio||1));
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', {alpha:false});
+  const $ = (id)=>document.getElementById(id);
+
+  // ---------- State ----------
+  const state = {
+    L1:160, L2:160, m1:1.2, m2:1.0, g:500, damp:0.002, speed:1.0,
+    running:true, resScale:1.0, quality:1.0, autoPerf:true,
+    trailMax:2500, sampleEvery:2,
+    zoom:1.0, panX:0, panY:0
+  };
+
+  // UI bindings
+  const sliders = ['l1','l2','m1','m2','g','damp','trail','speed'];
+  function applyUI(){
+    state.L1 = +$('l1').value; state.L2 = +$('l2').value;
+    state.m1 = +$('m1').value; state.m2 = +$('m2').value;
+    state.g = +$('g').value; state.damp = +$('damp').value;
+    state.trailMax = +$('trail').value; state.speed = +$('speed').value;
+    if (window.MathJax) MathJax.typesetPromise?.();
+    worker?.postMessage({type:'params', data: {L1:state.L1, L2:state.L2, m1:state.m1, m2:state.m2, g:state.g, damp:state.damp, speed:state.speed}});
+  }
+  sliders.forEach(id => $(id).addEventListener('input', applyUI));
+  $('toggle').onclick = ()=>{ state.running=!state.running; $('toggle').textContent = state.running? 'Pause':'Play'; };
+  $('reset').onclick = ()=>{ $('l1').value=160; $('l2').value=160; $('m1').value=1.2; $('m2').value=1.0; $('g').value=500; $('damp').value=0.002; $('trail').value=2500; $('speed').value=1.0; state.zoom=1; state.panX=0; state.panY=0; clearTrail(); applyUI(); };
+  $('randomize').onclick = ()=>{ $('l1').value=(100+Math.random()*180)|0; $('l2').value=(100+Math.random()*180)|0; $('m1').value=(0.4+Math.random()*3.6).toFixed(1); $('m2').value=(0.4+Math.random()*3.6).toFixed(1); $('g').value=(300+Math.random()*500)|0; $('damp').value=(Math.random()*0.008).toFixed(4); $('trail').value=(800+Math.random()*4500)|0; $('speed').value=(0.6+Math.random()*2).toFixed(2); applyUI(); };
+  $('perf').onclick = ()=>{ state.autoPerf=!state.autoPerf; $('perf').textContent='Perf: '+(state.autoPerf?'Auto':'Manual'); };
+  $('clear').onclick = ()=> clearTrail();
+
+  // Slide panel behaviour
+  const panel=$('panel'), tab=$('tab');
+  const setCollapsed = v => panel.classList.toggle('collapsed', v);
+  tab.addEventListener('click', ()=> setCollapsed(!panel.classList.contains('collapsed')));
+  let draggingPanel=false, startX=0, startTx=0;
+  tab.addEventListener('pointerdown',(e)=>{ draggingPanel=true; startX=e.clientX; startTx=panel.classList.contains('collapsed')?1:0; tab.setPointerCapture(e.pointerId); });
+  tab.addEventListener('pointermove',(e)=>{ if(!draggingPanel) return; const dx=e.clientX-startX; const w=Math.min(380, panel.getBoundingClientRect().width); const prog=Math.min(1, Math.max(0, startTx + (-dx)/w)); panel.style.transition='none'; panel.style.transform=`translateX(${prog*(100- (32*100/w))}%)`; });
+  const endDrag=(e)=>{ if(!draggingPanel) return; draggingPanel=false; tab.releasePointerCapture(e.pointerId); panel.style.transition=''; const r=panel.getBoundingClientRect(); const atEdge=(window.innerWidth - r.right)/r.width; const collapsed=atEdge>0.45; setCollapsed(collapsed); panel.style.transform=''; };
+  tab.addEventListener('pointerup',endDrag); tab.addEventListener('pointercancel',endDrag);
+
+  // ---------- Canvas sizing ----------
+  function resize(){
+    const rs = state.resScale;
+    const w = Math.floor(window.innerWidth * DPR * rs);
+    const h = Math.floor(window.innerHeight * DPR * rs);
+    if(canvas.width!==w||canvas.height!==h){
+      canvas.width=w; canvas.height=h;
+      canvas.style.width=window.innerWidth+'px';
+      canvas.style.height=window.innerHeight+'px';
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.scale(1/rs,1/rs);
+      ctx.fillStyle='#050611'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+  }
+  window.addEventListener('resize', resize);
+
+  // ---------- Physics worker ----------
+  const workerCode = `
+    let L1=160,L2=160,m1=1.2,m2=1.0,g=500,damp=0.002,speed=1.0;
+    let th1=Math.PI*0.8, th2=Math.PI*1.1, w1=0, w2=0;
+    let running=true;
+    const dt=1/240; // base physics step (s)
+
+    function deriv(y){
+      const [t1,t2,om1,om2]=y;
+      const s12=Math.sin(t1-t2), c12=Math.cos(t1-t2);
+      const den = 2*m1+m2 - m2*Math.cos(2*t1-2*t2);
+      const dom1 = (-g*(2*m1+m2)*Math.sin(t1) - m2*g*Math.sin(t1-2*t2) - 2*s12*m2*(om2*om2*L2 + om1*om1*L1*c12)) / (L1*den) - damp*om1;
+      const dom2 = (2*s12*(om1*om1*L1*(m1+m2) + g*(m1+m2)*Math.cos(t1) + om2*om2*L2*m2*c12)) / (L2*den) - damp*om2;
+      return [om1, om2, dom1, dom2];
+    }
+
+    function rk4Step(){
+      const y=[th1,th2,w1,w2];
+      const k1=deriv(y);
+      const y2=y.map((v,i)=>v+0.5*dt*speed*k1[i]);
+      const k2=deriv(y2);
+      const y3=y.map((v,i)=>v+0.5*dt*speed*k2[i]);
+      const k3=deriv(y3);
+      const y4=y.map((v,i)=>v+dt*speed*k3[i]);
+      const k4=deriv(y4);
+      th1 += dt*speed*(k1[0]+2*k2[0]+2*k3[0]+k4[0])/6;
+      th2 += dt*speed*(k1[1]+2*k2[1]+2*k3[1]+k4[1])/6;
+      w1  += dt*speed*(k1[2]+2*k2[2]+2*k3[2]+k4[2])/6;
+      w2  += dt*speed*(k1[3]+2*k2[3]+2*k3[3]+k4[3])/6;
+    }
+
+    function loop(){
+      if(running){
+        for(let i=0;i<2;i++) rk4Step(); // 480 Hz internal for stability
+        const x1=L1*Math.sin(th1), y1=L1*Math.cos(th1);
+        const x2=x1+L2*Math.sin(th2), y2=y1+L2*Math.cos(th2);
+        postMessage({type:'pos', data:{x1,y1,x2,y2, th1,th2}});
+      }
+    }
+    let timer = setInterval(loop, 1000/120);
+
+    onmessage = (e)=>{
+      const {type, data} = e.data;
+      if(type==='params'){
+        ({L1,L2,m1,m2,g,damp,speed} = data);
+      } else if(type==='state'){
+        running = data.running;
+      } else if(type==='reset'){
+        th1=Math.PI*0.8; th2=Math.PI*1.1; w1=0; w2=0;
+      }
+    };
+  `;
+  const worker = new Worker(URL.createObjectURL(new Blob([workerCode],{type:'text/javascript'})));
+
+  // ---------- Render data ----------
+  const trail = []; // stores {x,y,alpha}
+  function clearTrail(){ trail.length=0; }
+
+  worker.onmessage = (e)=>{
+    if(e.data.type==='pos'){
+      const {x1,y1,x2,y2} = e.data.data;
+      // Sample down to control memory
+      sampleCounter++;
+      if(sampleCounter % state.sampleEvery === 0){
+        trail.push({x:x2, y:y2});
+        if(trail.length>state.trailMax) trail.splice(0, trail.length - state.trailMax);
+      }
+      cur.x1=x1; cur.y1=y1; cur.x2=x2; cur.y2=y2;
+    }
+  };
+
+  function sendParams(){
+    worker.postMessage({type:'params', data:{L1:state.L1,L2:state.L2,m1:state.m1,m2:state.m2,g:state.g,damp:state.damp,speed:state.speed}});
+  }
+
+  // ---------- Interaction on canvas ----------
+  let dragging=false, lastX=0, lastY=0; let sampleCounter=0;
+  const cur = {x1:0,y1:0,x2:0,y2:0};
+  canvas.addEventListener('pointerdown',e=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove',e=>{ if(!dragging) return; const dx=e.clientX-lastX, dy=e.clientY-lastY; lastX=e.clientX; lastY=e.clientY; state.panX+=dx*(1/state.resScale); state.panY+=dy*(1/state.resScale); });
+  canvas.addEventListener('pointerup',e=>{ dragging=false; canvas.releasePointerCapture(e.pointerId); });
+  canvas.addEventListener('wheel',e=>{ const k = Math.exp(-e.deltaY*0.001); state.zoom = Math.min(2.5, Math.max(0.4, state.zoom*k)); e.preventDefault(); }, {passive:false});
+  canvas.addEventListener('dblclick',()=>{ state.panX=0; state.panY=0; state.zoom=1; });
+
+  window.addEventListener('keydown',e=>{
+    if(e.key===' '){ state.running=!state.running; $('toggle').textContent=state.running?'Pause':'Play'; worker.postMessage({type:'state', data:{running:state.running}}); e.preventDefault(); }
+    if(e.key==='r'){ $('reset').click(); }
+    if(e.key==='c'){ clearTrail(); }
+  });
+
+  // ---------- Rendering ----------
+  function fadeFrame(){
+    ctx.save(); ctx.globalCompositeOperation='source-over'; ctx.fillStyle='rgba(5,6,17,0.1)'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.restore();
+  }
+
+  function draw(){
+    const rs=state.resScale; const W=canvas.width*rs/DPR, H=canvas.height*rs/DPR;
+    const cx=W*0.5 + state.panX, cy=H*0.35 + state.panY; // slight top bias
+
+    ctx.save();
+    ctx.translate(cx,cy); ctx.scale(state.zoom, state.zoom);
+
+    // halo
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    const grd = ctx.createRadialGradient(0,0,0,0,0, Math.min(W,H)*0.6);
+    grd.addColorStop(0,'rgba(0,255,255,0.04)'); grd.addColorStop(1,'rgba(255,0,170,0)');
+    ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0, Math.min(W,H)*0.6, 0, Math.PI*2); ctx.fill(); ctx.restore();
+
+    // rods
+    ctx.lineWidth = Math.max(1, 1.2*state.quality);
+    ctx.strokeStyle = 'rgba(210,230,255,0.8)';
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(cur.x1, cur.y1); ctx.lineTo(cur.x2, cur.y2); ctx.stroke();
+
+    // masses
+    ctx.fillStyle = 'white';
+    ctx.shadowColor='rgba(255,255,255,0.7)'; ctx.shadowBlur=10*state.quality;
+    ctx.beginPath(); ctx.arc(cur.x1, cur.y1, 3.0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cur.x2, cur.y2, 3.2, 0, Math.PI*2); ctx.fill();
+
+    // trail as polyline with gradient alpha
+    if(trail.length>1){
+      const n = trail.length; const step = Math.max(1, Math.floor((1/state.quality)));
+      ctx.shadowBlur=12*state.quality; ctx.globalCompositeOperation='lighter';
+      for(let i=0;i<n-1;i+=step){
+        const a = i/n; // 0..1 from oldest to newest
+        const r = Math.round(0*(1-a) + 255*a), g = Math.round(240*(1-a) + 77*a), b = Math.round(255*(1-a) + 210*a);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${0.25 + 0.55*a})`;
+        ctx.beginPath(); ctx.moveTo(trail[i].x, trail[i].y); ctx.lineTo(trail[i+1].x, trail[i+1].y); ctx.stroke();
+      }
+    }
+
+    ctx.restore();
+  }
+
+  // ---------- Perf monitor & autotune ----------
+  let frameCount=0, lastSec=performance.now(), fps=60;
+  function tune(){
+    const now=performance.now(); frameCount++;
+    if(now-lastSec>1000){
+      fps = frameCount*1000/(now-lastSec); frameCount=0; lastSec=now;
+      if(state.autoPerf){
+        if(fps<50 && state.quality>0.85) state.quality=Math.max(0.75, state.quality-0.05);
+        if(fps<45 && state.sampleEvery<6) state.sampleEvery++;
+        if(fps<40 && state.resScale>0.85){ state.resScale=Math.max(0.75, state.resScale-0.05); resize(); }
+        if(fps<35 && state.trailMax>1200) state.trailMax=Math.max(1200, state.trailMax-200);
+        if(fps>62){
+          if(state.resScale<1){ state.resScale=Math.min(1, state.resScale+0.02); resize(); }
+          state.quality=Math.min(1, state.quality+0.02);
+          if(state.sampleEvery>2) state.sampleEvery--;
+          if(state.trailMax<4000) state.trailMax+=100;
+        }
+      }
+      $('stats').textContent=`FPS: ${Math.round(fps)} · resScale: ${state.resScale.toFixed(2)} · quality: ${state.quality.toFixed(2)} · points: ${trail.length}`;
+    }
+  }
+
+  // ---------- Main loop ----------
+  function frame(){
+    if(state.running){ fadeFrame(); draw(); }
+    tune(); requestAnimationFrame(frame);
+  }
+
+  // ---------- Init ----------
+  function init(){ resize(); applyUI(); sendParams(); frame(); worker.postMessage({type:'state', data:{running:true}}); }
+  init();
+
+  // quick device probe
+  (function probe(){ let frames=0; const start=performance.now(); function tick(){ frames++; if(frames<30) requestAnimationFrame(tick); else { const probe=frames*1000/(performance.now()-start); if(probe<45){ state.resScale=0.9; state.sampleEvery=3; resize(); } } } tick(); })();
+  </script>
+</body>
+</html>
