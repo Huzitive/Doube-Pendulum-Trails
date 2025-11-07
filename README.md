@@ -53,21 +53,6 @@ Adjust directly in the side panel:
 
 ---
 
-## 🧮 Equations of Motion
-
-\[
-\begin{aligned}
-\dot{\theta}_1 &= \omega_1,\\
-\dot{\theta}_2 &= \omega_2,\\
-\dot{\omega}_1 &= 
-\frac{-g(2m_1+m_2)\sin\theta_1 - m_2 g\sin(\theta_1-2\theta_2) - 2\sin(\theta_1-\theta_2)\, m_2 (\omega_2^2 L_2 + \omega_1^2 L_1\cos(\theta_1-\theta_2))}{L_1[2m_1+m_2 - m_2\cos(2\theta_1-2\theta_2)]} - \gamma\omega_1,\\
-\dot{\omega}_2 &= 
-\frac{2\sin(\theta_1-\theta_2)\,[\omega_1^2 L_1 (m_1+m_2) + g (m_1+m_2)\cos\theta_1 + \omega_2^2 L_2 m_2 \cos(\theta_1-\theta_2)]}{L_2[2m_1+m_2 - m_2\cos(2\theta_1-2\theta_2)]} - \gamma\omega_2.
-\end{aligned}
-\]
-
----
-
 ## 🖥️ Tech Stack
 
 - **HTML5 Canvas** for visualization  
